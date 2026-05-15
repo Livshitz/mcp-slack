@@ -56,7 +56,7 @@ export class SlackStreamer {
     this.transform = options.transform ?? ((t) => t);
     this.finalTransform = options.finalTransform;
     this.flushInterval = options.flushInterval ?? 300;
-    this.flushThreshold = options.flushThreshold ?? 80;
+    this.flushThreshold = options.flushThreshold ?? 30;
     this.flat = !options.threadTs;
   }
 
@@ -105,9 +105,9 @@ export class SlackStreamer {
       return this._postMessage(finalMrkdwn);
     }
 
-    // Wait for all queued flushes, then flush any remaining buffer
+    // Flush remaining buffer and wait for all sends to complete
+    this._flushRemaining();
     await this.flushChain;
-    await this._doFlush();
 
     const stopPayload: Record<string, unknown> = { channel: this.channel, ts: this.ts };
     if (resolvedText !== this.fullText) {
@@ -149,10 +149,13 @@ export class SlackStreamer {
     this.ts = (res as any).ts ?? null;
   }
 
-  /** Enqueue a flush onto the chain — ensures sequential execution even when feed() is called rapidly. */
+  /** Snapshot the buffer now, enqueue the actual HTTP send onto the chain. */
   private _enqueueFlush(): void {
     this._clearTimer();
-    this.flushChain = this.flushChain.then(() => this._doFlush());
+    if (!this.buffer) return;
+    const snapshot = this.transform(this.buffer);
+    this.buffer = '';
+    this.flushChain = this.flushChain.then(() => this._sendChunk(snapshot));
   }
 
   private _enqueueToolUpdate(tool: string): void {
@@ -164,13 +167,10 @@ export class SlackStreamer {
     this.timer = setTimeout(() => this._enqueueFlush(), this.flushInterval);
   }
 
-  private async _doFlush(): Promise<void> {
-    if (!this.buffer || this.aborted) return;
+  private async _sendChunk(chunk: string): Promise<void> {
+    if (!chunk || this.aborted) return;
     if (this.startPromise) await this.startPromise;
     if (!this.ts) return;
-
-    const chunk = this.transform(this.buffer);
-    this.buffer = '';
 
     const res = await slackApi(this.botToken, 'chat.appendStream', {
       channel: this.channel,
@@ -178,6 +178,14 @@ export class SlackStreamer {
       markdown_text: chunk,
     });
     if (!res.ok) console.error('[slack-streamer] appendStream failed:', (res as any).error);
+  }
+
+  /** Flush any remaining buffer (used by finish). */
+  private _flushRemaining(): void {
+    if (!this.buffer) return;
+    const snapshot = this.transform(this.buffer);
+    this.buffer = '';
+    this.flushChain = this.flushChain.then(() => this._sendChunk(snapshot));
   }
 
   private async _doToolUpdate(tool: string): Promise<void> {
