@@ -1,15 +1,25 @@
 /**
  * SlackStreamer — progressive message streaming via chat.startStream/appendStream/stopStream.
- * Falls back to chat.postMessage for flat messages (no thread_ts).
+ * Falls back to chat.postMessage for flat messages (no thread_ts) or user-token sessions.
+ * Note: startStream only works with bot tokens — user tokens get not_allowed_token_type.
  */
 import { slackApi, requireToken, optionalUserToken } from './slack-api.ts';
+
+// Cached auth.test results for recipient fields required by startStream
+let cachedAuthInfo: { teamId: string; botUserId: string } | null = null;
+
+async function getAuthInfo(token: string): Promise<{ teamId: string; botUserId: string }> {
+  if (cachedAuthInfo) return cachedAuthInfo;
+  const res = await slackApi<{ team_id?: string; user_id?: string }>(token, 'auth.test', {});
+  if (!res.ok) throw new Error(`auth.test failed: ${(res as any).error}`);
+  cachedAuthInfo = { teamId: (res as any).team_id, botUserId: (res as any).user_id };
+  return cachedAuthInfo;
+}
 
 export interface SlackStreamerOptions {
   channel: string;
   threadTs?: string;
   useUserToken?: boolean;
-  recipientUserId?: string;
-  recipientTeamId?: string;
   /** Transform text before sending to Slack (e.g. markdown → mrkdwn). Applied per-flush and on final stop. */
   transform?: (text: string) => string;
   /** Async transform on final text (e.g. resolve user mentions). Runs on finish(). */
@@ -23,7 +33,8 @@ export interface SlackStreamerOptions {
 export class SlackStreamer {
   private channel: string;
   private threadTs?: string;
-  private token: string;
+  private botToken: string;
+  private postToken: string;
   private transform: (t: string) => string;
   private finalTransform?: (t: string) => Promise<string>;
   private flushInterval: number;
@@ -35,8 +46,6 @@ export class SlackStreamer {
   private started = false;
   private aborted = false;
   private startPromise: Promise<void> | null = null;
-  private recipientUserId?: string;
-  private recipientTeamId?: string;
 
   /** Message timestamp — available after first text is fed (and startStream resolves). */
   public ts: string | null = null;
@@ -47,15 +56,15 @@ export class SlackStreamer {
   constructor(private options: SlackStreamerOptions) {
     this.channel = options.channel;
     this.threadTs = options.threadTs;
-    this.token = options.useUserToken
-      ? (optionalUserToken() ?? requireToken())
-      : requireToken();
+    // startStream requires bot token; postMessage uses whichever token the caller wants
+    this.botToken = requireToken();
+    this.postToken = options.useUserToken
+      ? (optionalUserToken() ?? this.botToken)
+      : this.botToken;
     this.transform = options.transform ?? ((t) => t);
     this.finalTransform = options.finalTransform;
     this.flushInterval = options.flushInterval ?? 600;
     this.flushThreshold = options.flushThreshold ?? 200;
-    this.recipientUserId = options.recipientUserId;
-    this.recipientTeamId = options.recipientTeamId;
     this.flat = !options.threadTs;
   }
 
@@ -110,7 +119,7 @@ export class SlackStreamer {
     // Flush remaining buffer
     await this._flush();
 
-    const res = await slackApi<{ ok: boolean }>(this.token, 'chat.stopStream', {
+    const res = await slackApi<{ ok: boolean }>(this.botToken, 'chat.stopStream', {
       channel: this.channel,
       ts: this.ts,
       markdown_text: finalMrkdwn,
@@ -126,7 +135,7 @@ export class SlackStreamer {
     this.aborted = true;
     this._clearTimer();
     if (this.started && this.ts) {
-      slackApi(this.token, 'chat.stopStream', {
+      slackApi(this.botToken, 'chat.stopStream', {
         channel: this.channel,
         ts: this.ts,
         markdown_text: '⚠️ Aborted',
@@ -137,14 +146,15 @@ export class SlackStreamer {
   // ── Private ──────────────────────────────────────────────────────────────
 
   private async _start(): Promise<void> {
+    const auth = await getAuthInfo(this.botToken);
     const payload: Record<string, unknown> = {
       channel: this.channel,
       thread_ts: this.threadTs,
+      recipient_team_id: auth.teamId,
+      recipient_user_id: auth.botUserId,
     };
-    if (this.recipientUserId) payload.recipient_user_id = this.recipientUserId;
-    if (this.recipientTeamId) payload.recipient_team_id = this.recipientTeamId;
 
-    const res = await slackApi<{ ts?: string }>(this.token, 'chat.startStream', payload);
+    const res = await slackApi<{ ts?: string }>(this.botToken, 'chat.startStream', payload);
     if (!res.ok) {
       console.error('[slack-streamer] startStream failed:', (res as any).error);
       return;
@@ -170,11 +180,12 @@ export class SlackStreamer {
     const chunk = this.transform(this.buffer);
     this.buffer = '';
 
-    await slackApi(this.token, 'chat.appendStream', {
+    const res = await slackApi(this.botToken, 'chat.appendStream', {
       channel: this.channel,
       ts: this.ts,
       markdown_text: chunk,
-    }).catch((err) => console.error('[slack-streamer] appendStream failed:', err));
+    });
+    if (!res.ok) console.error('[slack-streamer] appendStream failed:', (res as any).error);
   }
 
   private async _appendToolUpdate(tool: string): Promise<void> {
@@ -182,7 +193,7 @@ export class SlackStreamer {
     if (!this.ts || this.aborted) return;
 
     const label = tool.length > 250 ? tool.slice(0, 250) + '…' : tool;
-    await slackApi(this.token, 'chat.appendStream', {
+    await slackApi(this.botToken, 'chat.appendStream', {
       channel: this.channel,
       ts: this.ts,
       chunks: [{ type: 'task_update', text: label }],
@@ -192,7 +203,7 @@ export class SlackStreamer {
   private async _postMessage(text: string): Promise<string | null> {
     const payload: Record<string, unknown> = { channel: this.channel, text };
     if (this.threadTs) payload.thread_ts = this.threadTs;
-    const res = await slackApi<{ ts?: string }>(this.token, 'chat.postMessage', payload);
+    const res = await slackApi<{ ts?: string }>(this.postToken, 'chat.postMessage', payload);
     if (!res.ok) {
       console.error('[slack-streamer] postMessage fallback failed:', (res as any).error);
       return null;
