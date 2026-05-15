@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { json } from 'itty-router';
 import { RouterWrapper } from 'edge.libx.js/build/main.js';
 import { augmentMcpWithSkillResource } from './mcp/with-skill-resource.ts';
-import { requireToken, slackApi } from './slack-api.ts';
+import { requireToken, optionalUserToken, slackApi } from './slack-api.ts';
 import { slimChannels, slimHistory, slimSearch } from './slim.ts';
 import { inlineOrSpool } from './spool.ts';
 import { registerDmUserRoutes } from './routes-dm.ts';
@@ -177,9 +177,50 @@ export function createSlackMcp() {
     }
   });
 
+  base.describeMCP('/slack/thread/:channel/:ts', 'GET', {
+    description:
+      'Fetch thread replies for a message. Use the parent message ts (from history or search results) to get all replies in the thread.',
+    params: {
+      channel: { description: 'Conversation id C… G… or D…', type: 'string', required: true },
+      ts: { description: 'Thread parent message timestamp', type: 'string', required: true },
+      limit: { description: 'Max replies (default 50, max 200)', type: 'string' },
+      cursor: { description: 'Pagination cursor', type: 'string' },
+      full: { description: 'Raw Slack message objects', type: 'string' },
+    },
+    annotations: { readOnlyHint: true },
+  });
+  router.get('/slack/thread/:channel/:ts', async (req) => {
+    try {
+      const token = requireToken();
+      const channel = req.params.channel as string;
+      const ts = req.params.ts as string;
+      if (!channel) return json({ ok: false, error: 'channel required' }, { status: 400 });
+      if (!ts) return json({ ok: false, error: 'ts required' }, { status: 400 });
+      const limit = Math.min(200, Math.max(1, parseInt(qp(req, 'limit') ?? '50', 10) || 50));
+      const cursor = qp(req, 'cursor');
+      const full = truthyFull(req);
+      const data = await slackApi<{
+        ok: boolean;
+        messages?: Record<string, unknown>[];
+        has_more?: boolean;
+        response_metadata?: { next_cursor?: string };
+      }>(token, 'conversations.replies', {
+        channel,
+        ts,
+        limit,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (!data.ok) return json(data, { status: 400 });
+      const out = full ? data : slimHistory(data);
+      return json(inlineOrSpool('get_slack_thread', out));
+    } catch (e) {
+      return json({ ok: false, error: errMessage(e) }, { status: 500 });
+    }
+  });
+
   base.describeMCP('/slack/search', 'GET', {
     description:
-      'Workspace message search. Query param is q (not query). Needs search:* bot scopes; many bot tokens return not_allowed_token_type — use by-email + dm/open instead.',
+      'Workspace message search. Query param is q (not query). Requires SLACK_USER_TOKEN (xoxp-) — search.messages is user-token-only. Falls back to bot token but will likely return not_allowed_token_type.',
     params: {
       q: { description: 'Search query (Slack search syntax)', type: 'string', required: true },
       count: { description: 'Max results (default 15, max 100)', type: 'string' },
@@ -192,7 +233,7 @@ export function createSlackMcp() {
   });
   router.get('/slack/search', async (req) => {
     try {
-      const token = requireToken();
+      const token = optionalUserToken() ?? requireToken();
       const q = qp(req, 'q')?.trim();
       if (!q) return json({ ok: false, error: 'q is required' }, { status: 400 });
       const count = Math.min(
@@ -229,7 +270,7 @@ export function createSlackMcp() {
     name: 'mcp-slack',
     version: '0.1.0',
     instructions:
-      'Slack: post_message needs real ids (C/G/D). DM flow: get_slack_users (search by name) or get_slack_user_by_email → get user ID (U…) → post_slack_dm_open → post_slack_message with D… channel_id. Prefer get_slack_users over by-email when you don\'t know the exact email. search param is q; search may fail without search scopes. Invite bot to channels for is_member true. Large payloads: spooled file path. Full workflows: MCP resource skill://mcp-slack/workflow.',
+      'Slack: post_message needs real ids (C/G/D). DM flow: get_slack_users (search by name) or get_slack_user_by_email → get user ID (U…) → post_slack_dm_open → post_slack_message with D… channel_id. Prefer get_slack_users over by-email when you don\'t know the exact email. Thread replies: get_slack_thread with channel + parent ts. Search (q param): requires SLACK_USER_TOKEN (xoxp-); auto-used when set. Invite bot to channels for is_member true. Large payloads: spooled file path. Full workflows: MCP resource skill://mcp-slack/workflow.',
   });
 
   augmentMcpWithSkillResource(mcp, {
@@ -237,6 +278,15 @@ export function createSlackMcp() {
     repoRootAbs: resolve(import.meta.dirname, '..'),
     skillRelativePath: '.claude/skills/mcp-slack/SKILL.md',
   });
+
+  // Keep the agent's Slack user account appearing online
+  const userToken = optionalUserToken();
+  if (userToken) {
+    const ping = () => slackApi(userToken, 'users.setPresence', { presence: 'auto' })
+      .catch(e => console.error('[mcp-slack] setPresence failed:', e));
+    ping();
+    setInterval(ping, 5 * 60 * 1000);
+  }
 
   async function httpFetch(req: Request): Promise<Response> {
     const url = new URL(req.url);

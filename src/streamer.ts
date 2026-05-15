@@ -5,7 +5,6 @@
  */
 import { slackApi, requireToken, optionalUserToken } from './slack-api.ts';
 
-// Cached auth.test results for recipient fields required by startStream
 let cachedAuthInfo: { teamId: string; botUserId: string } | null = null;
 
 async function getAuthInfo(token: string): Promise<{ teamId: string; botUserId: string }> {
@@ -20,13 +19,9 @@ export interface SlackStreamerOptions {
   channel: string;
   threadTs?: string;
   useUserToken?: boolean;
-  /** Transform text before sending to Slack (e.g. markdown → mrkdwn). Applied per-flush and on final stop. */
   transform?: (text: string) => string;
-  /** Async transform on final text (e.g. resolve user mentions). Runs on finish(). */
   finalTransform?: (text: string) => Promise<string>;
-  /** Buffer flush interval in ms (default 600) */
   flushInterval?: number;
-  /** Buffer size threshold in chars before auto-flush (default 200) */
   flushThreshold?: number;
 }
 
@@ -46,29 +41,25 @@ export class SlackStreamer {
   private started = false;
   private aborted = false;
   private startPromise: Promise<void> | null = null;
+  private flushChain: Promise<void> = Promise.resolve();
 
-  /** Message timestamp — available after first text is fed (and startStream resolves). */
   public ts: string | null = null;
-
-  /** True when streaming isn't possible (no thread_ts) — falls back to postMessage. */
   public readonly flat: boolean;
 
   constructor(private options: SlackStreamerOptions) {
     this.channel = options.channel;
     this.threadTs = options.threadTs;
-    // startStream requires bot token; postMessage uses whichever token the caller wants
     this.botToken = requireToken();
     this.postToken = options.useUserToken
       ? (optionalUserToken() ?? this.botToken)
       : this.botToken;
     this.transform = options.transform ?? ((t) => t);
     this.finalTransform = options.finalTransform;
-    this.flushInterval = options.flushInterval ?? 600;
-    this.flushThreshold = options.flushThreshold ?? 200;
+    this.flushInterval = options.flushInterval ?? 300;
+    this.flushThreshold = options.flushThreshold ?? 80;
     this.flat = !options.threadTs;
   }
 
-  /** Feed a streaming event. Call for each text_delta or tool_use. */
   feed(ev: { type: string; text?: string; tool?: string }): void {
     if (this.aborted) return;
 
@@ -82,18 +73,17 @@ export class SlackStreamer {
         this.startPromise = this._start();
       }
       if (this.buffer.length >= this.flushThreshold) {
-        this._scheduleFlush(0);
+        this._enqueueFlush();
       } else {
-        this._scheduleFlush(this.flushInterval);
+        this._scheduleTimer();
       }
     } else if (ev.type === 'tool_use' && ev.tool) {
       if (this.flat) return;
-      this._scheduleFlush(0);
-      this._appendToolUpdate(ev.tool);
+      this._enqueueFlush();
+      this._enqueueToolUpdate(ev.tool);
     }
   }
 
-  /** Finalize the stream. Returns the message ts, or null if nothing was sent. */
   async finish(): Promise<string | null> {
     if (this.aborted) return null;
     this._clearTimer();
@@ -111,26 +101,25 @@ export class SlackStreamer {
 
     if (this.startPromise) await this.startPromise;
 
-    // Streaming failed (e.g. bot tokens can't use startStream) — fall back to postMessage
     if (!this.ts) {
       return this._postMessage(finalMrkdwn);
     }
 
-    // Flush remaining buffer
-    await this._flush();
+    // Wait for all queued flushes, then flush any remaining buffer
+    await this.flushChain;
+    await this._doFlush();
 
-    const res = await slackApi<{ ok: boolean }>(this.botToken, 'chat.stopStream', {
-      channel: this.channel,
-      ts: this.ts,
-      markdown_text: finalMrkdwn,
-    });
+    const stopPayload: Record<string, unknown> = { channel: this.channel, ts: this.ts };
+    if (resolvedText !== this.fullText) {
+      stopPayload.markdown_text = finalMrkdwn;
+    }
+    const res = await slackApi<{ ok: boolean }>(this.botToken, 'chat.stopStream', stopPayload);
     if (!res.ok) {
       console.error('[slack-streamer] stopStream failed:', (res as any).error);
     }
     return this.ts;
   }
 
-  /** Abort the stream without finalizing. */
   abort(): void {
     this.aborted = true;
     this._clearTimer();
@@ -147,14 +136,12 @@ export class SlackStreamer {
 
   private async _start(): Promise<void> {
     const auth = await getAuthInfo(this.botToken);
-    const payload: Record<string, unknown> = {
+    const res = await slackApi<{ ts?: string }>(this.botToken, 'chat.startStream', {
       channel: this.channel,
       thread_ts: this.threadTs,
       recipient_team_id: auth.teamId,
       recipient_user_id: auth.botUserId,
-    };
-
-    const res = await slackApi<{ ts?: string }>(this.botToken, 'chat.startStream', payload);
+    });
     if (!res.ok) {
       console.error('[slack-streamer] startStream failed:', (res as any).error);
       return;
@@ -162,17 +149,22 @@ export class SlackStreamer {
     this.ts = (res as any).ts ?? null;
   }
 
-  private _scheduleFlush(delay: number): void {
+  /** Enqueue a flush onto the chain — ensures sequential execution even when feed() is called rapidly. */
+  private _enqueueFlush(): void {
     this._clearTimer();
-    if (delay === 0) {
-      this._flush();
-      return;
-    }
-    this.timer = setTimeout(() => this._flush(), delay);
+    this.flushChain = this.flushChain.then(() => this._doFlush());
   }
 
-  private async _flush(): Promise<void> {
+  private _enqueueToolUpdate(tool: string): void {
+    this.flushChain = this.flushChain.then(() => this._doToolUpdate(tool));
+  }
+
+  private _scheduleTimer(): void {
     this._clearTimer();
+    this.timer = setTimeout(() => this._enqueueFlush(), this.flushInterval);
+  }
+
+  private async _doFlush(): Promise<void> {
     if (!this.buffer || this.aborted) return;
     if (this.startPromise) await this.startPromise;
     if (!this.ts) return;
@@ -188,16 +180,17 @@ export class SlackStreamer {
     if (!res.ok) console.error('[slack-streamer] appendStream failed:', (res as any).error);
   }
 
-  private async _appendToolUpdate(tool: string): Promise<void> {
+  private async _doToolUpdate(tool: string): Promise<void> {
     if (this.startPromise) await this.startPromise;
     if (!this.ts || this.aborted) return;
 
     const label = tool.length > 250 ? tool.slice(0, 250) + '…' : tool;
-    await slackApi(this.botToken, 'chat.appendStream', {
+    const res = await slackApi(this.botToken, 'chat.appendStream', {
       channel: this.channel,
       ts: this.ts,
       chunks: [{ type: 'task_update', text: label }],
-    }).catch((err) => console.error('[slack-streamer] task_update failed:', err));
+    });
+    if (!res.ok) console.error('[slack-streamer] task_update failed:', (res as any).error);
   }
 
   private async _postMessage(text: string): Promise<string | null> {

@@ -1,8 +1,7 @@
 /**
- * Slack Web API via fetch. Must be Bot User OAuth Token (xoxb-…). User tokens (xoxp-…) act as that user.
- * Typical scopes: chat:write, channels:history, channels:read, groups:history, groups:read,
- * im:history, im:write (conversations.open for DMs), mpim:history,
- * users:read.email (users.lookupByEmail), search:* (search.messages; often restricted on bot tokens).
+ * Slack Web API via fetch. Dual-token model:
+ * - SLACK_BOT_TOKEN (xoxb-): posting, channel history, thread replies, users, DMs
+ * - SLACK_USER_TOKEN (xoxp-): search.messages and other user-only endpoints
  */
 export type SlackOk<T> = T & { ok: true };
 export type SlackErr = { ok: false; error: string };
@@ -37,5 +36,19 @@ export function requireToken(): string {
     throw new Error(
       'SLACK_BOT_TOKEN must be the Bot User OAuth Token (prefix xoxb-). A User token (xoxp-) posts as that human, not the app bot.',
     );
+  return t;
+}
+
+export function optionalUserToken(): string | undefined {
+  const t = process.env.SLACK_USER_TOKEN?.trim();
+  if (!t) return undefined;
+  if (!t.startsWith('xoxp-'))
+    throw new Error('SLACK_USER_TOKEN must be a User OAuth Token (prefix xoxp-).');
+  return t;
+}
+
+export function requireUserToken(): string {
+  const t = optionalUserToken();
+  if (!t) throw new Error('SLACK_USER_TOKEN is not set');
   return t;
 }
