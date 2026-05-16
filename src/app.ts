@@ -145,9 +145,15 @@ export function createSlackMcp() {
       if (typeof body.thread_ts === 'string') completePayload.thread_ts = body.thread_ts;
       if (typeof body.initial_comment === 'string') completePayload.initial_comment = body.initial_comment;
 
-      const completeRes = await slackApi<{ ok: boolean }>(
-        token, 'files.completeUploadExternal', completePayload,
-      );
+      // files.completeUploadExternal requires JSON body, not form-urlencoded
+      const completeRes = await fetch('https://slack.com/api/files.completeUploadExternal', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify(completePayload),
+      }).then(r => r.json()) as { ok: boolean; error?: string };
       if (!completeRes.ok) return json(completeRes, { status: 400 });
 
       return json({ ok: true, files: uploaded });
