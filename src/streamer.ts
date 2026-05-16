@@ -42,6 +42,7 @@ export class SlackStreamer {
   private aborted = false;
   private startPromise: Promise<void> | null = null;
   private flushChain: Promise<void> = Promise.resolve();
+  private afterTool = false;
 
   public ts: string | null = null;
   public readonly flat: boolean;
@@ -64,6 +65,11 @@ export class SlackStreamer {
     if (this.aborted) return;
 
     if (ev.type === 'text_delta' && ev.text) {
+      if (this.afterTool) {
+        this.buffer += '\n';
+        this.fullText += '\n';
+        this.afterTool = false;
+      }
       this.buffer += ev.text;
       this.fullText += ev.text;
       if (this.flat) return;
@@ -78,6 +84,7 @@ export class SlackStreamer {
         this._scheduleTimer();
       }
     } else if (ev.type === 'tool_use' && ev.tool) {
+      this.afterTool = true;
       if (this.flat) return;
       this._enqueueFlush();
       this._enqueueToolUpdate(ev.tool);
