@@ -157,18 +157,26 @@ export function createSlackMcp() {
       const oldest = qp(req, 'oldest');
       const latest = qp(req, 'latest');
       const full = truthyFull(req);
-      const data = await slackApi<{
-        ok: boolean;
-        messages?: Record<string, unknown>[];
-        has_more?: boolean;
-        response_metadata?: { next_cursor?: string };
-      }>(token, 'conversations.history', {
+      const historyParams = {
         channel,
         limit,
         ...(cursor ? { cursor } : {}),
         ...(oldest ? { oldest } : {}),
         ...(latest ? { latest } : {}),
-      });
+      };
+      let data = await slackApi<{
+        ok: boolean;
+        messages?: Record<string, unknown>[];
+        has_more?: boolean;
+        response_metadata?: { next_cursor?: string };
+      }>(token, 'conversations.history', historyParams);
+      // DM channels the bot isn't part of — retry with user token
+      if (!data.ok && (data as any).error === 'channel_not_found') {
+        const ut = optionalUserToken();
+        if (ut) {
+          data = await slackApi(ut, 'conversations.history', historyParams);
+        }
+      }
       if (!data.ok) return json(data, { status: 400 });
       const out = full ? data : slimHistory(data);
       return json(inlineOrSpool('get_slack_history_by_channel', out));
@@ -199,17 +207,19 @@ export function createSlackMcp() {
       const limit = Math.min(200, Math.max(1, parseInt(qp(req, 'limit') ?? '50', 10) || 50));
       const cursor = qp(req, 'cursor');
       const full = truthyFull(req);
-      const data = await slackApi<{
+      const replyParams = { channel, ts, limit, ...(cursor ? { cursor } : {}) };
+      let data = await slackApi<{
         ok: boolean;
         messages?: Record<string, unknown>[];
         has_more?: boolean;
         response_metadata?: { next_cursor?: string };
-      }>(token, 'conversations.replies', {
-        channel,
-        ts,
-        limit,
-        ...(cursor ? { cursor } : {}),
-      });
+      }>(token, 'conversations.replies', replyParams);
+      if (!data.ok && (data as any).error === 'channel_not_found') {
+        const ut = optionalUserToken();
+        if (ut) {
+          data = await slackApi(ut, 'conversations.replies', replyParams);
+        }
+      }
       if (!data.ok) return json(data, { status: 400 });
       const out = full ? data : slimHistory(data);
       return json(inlineOrSpool('get_slack_thread', out));
