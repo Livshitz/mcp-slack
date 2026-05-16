@@ -46,7 +46,7 @@ export class SlackStreamer {
   public ts: string | null = null;
   public readonly flat: boolean;
 
-  constructor(private options: SlackStreamerOptions) {
+  constructor(options: SlackStreamerOptions) {
     this.channel = options.channel;
     this.threadTs = options.threadTs;
     this.botToken = requireToken();
@@ -158,11 +158,15 @@ export class SlackStreamer {
     if (!this.buffer) return;
     const snapshot = this.buffer;
     this.buffer = '';
-    this.flushChain = this.flushChain.then(() => this._sendChunk(snapshot));
+    this.flushChain = this.flushChain
+      .then(() => this._sendChunk(snapshot))
+      .catch((err) => console.error('[slack-streamer] flush error:', err));
   }
 
   private _enqueueToolUpdate(tool: string): void {
-    this.flushChain = this.flushChain.then(() => this._doToolUpdate(tool));
+    this.flushChain = this.flushChain
+      .then(() => this._doToolUpdate(tool))
+      .catch((err) => console.error('[slack-streamer] tool update error:', err));
   }
 
   private _scheduleTimer(): void {
@@ -187,7 +191,9 @@ export class SlackStreamer {
     if (!this.buffer) return;
     const snapshot = this.buffer;
     this.buffer = '';
-    this.flushChain = this.flushChain.then(() => this._sendChunk(snapshot));
+    this.flushChain = this.flushChain
+      .then(() => this._sendChunk(snapshot))
+      .catch((err) => console.error('[slack-streamer] flush error:', err));
   }
 
   private async _doToolUpdate(tool: string): Promise<void> {
