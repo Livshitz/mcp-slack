@@ -119,15 +119,23 @@ export class SlackStreamer {
     this._flushRemaining();
     await this.flushChain;
 
-    // Always send final transformed text — chunks were raw, stop replaces with formatted version
-    const stopPayload: Record<string, unknown> = {
+    // Stop the stream first (without markdown_text — it appends, not replaces)
+    const stopRes = await slackApi<{ ok: boolean }>(this.botToken, 'chat.stopStream', {
       channel: this.channel,
       ts: this.ts,
-      markdown_text: finalMrkdwn,
-    };
-    const res = await slackApi<{ ok: boolean }>(this.botToken, 'chat.stopStream', stopPayload);
-    if (!res.ok) {
-      console.error('[slack-streamer] stopStream failed:', (res as any).error);
+    });
+    if (!stopRes.ok) {
+      console.error('[slack-streamer] stopStream failed:', (stopRes as any).error);
+    }
+
+    // Then update the message with the final transformed text
+    const updateRes = await slackApi<{ ok: boolean }>(this.postToken, 'chat.update', {
+      channel: this.channel,
+      ts: this.ts,
+      text: finalMrkdwn,
+    });
+    if (!updateRes.ok) {
+      console.error('[slack-streamer] chat.update failed:', (updateRes as any).error);
     }
     return this.ts;
   }
