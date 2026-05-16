@@ -18,6 +18,7 @@ async function getAuthInfo(token: string): Promise<{ teamId: string; botUserId: 
 export interface SlackStreamerOptions {
   channel: string;
   threadTs?: string;
+  recipientUserId?: string;
   useUserToken?: boolean;
   transform?: (text: string) => string;
   finalTransform?: (text: string) => Promise<string>;
@@ -28,6 +29,7 @@ export interface SlackStreamerOptions {
 export class SlackStreamer {
   private channel: string;
   private threadTs?: string;
+  private recipientUserId?: string;
   private botToken: string;
   private postToken: string;
   private transform: (t: string) => string;
@@ -50,6 +52,7 @@ export class SlackStreamer {
   constructor(options: SlackStreamerOptions) {
     this.channel = options.channel;
     this.threadTs = options.threadTs;
+    this.recipientUserId = options.recipientUserId;
     this.botToken = requireToken();
     this.postToken = options.useUserToken
       ? (optionalUserToken() ?? this.botToken)
@@ -149,7 +152,7 @@ export class SlackStreamer {
       channel: this.channel,
       thread_ts: this.threadTs,
       recipient_team_id: auth.teamId,
-      recipient_user_id: auth.botUserId,
+      recipient_user_id: this.recipientUserId ?? auth.botUserId,
     });
     if (!res.ok) {
       console.error('[slack-streamer] startStream failed:', (res as any).error);
