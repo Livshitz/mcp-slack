@@ -109,10 +109,12 @@ export class SlackStreamer {
     this._flushRemaining();
     await this.flushChain;
 
-    const stopPayload: Record<string, unknown> = { channel: this.channel, ts: this.ts };
-    if (resolvedText !== this.fullText) {
-      stopPayload.markdown_text = finalMrkdwn;
-    }
+    // Always send final transformed text — chunks were raw, stop replaces with formatted version
+    const stopPayload: Record<string, unknown> = {
+      channel: this.channel,
+      ts: this.ts,
+      markdown_text: finalMrkdwn,
+    };
     const res = await slackApi<{ ok: boolean }>(this.botToken, 'chat.stopStream', stopPayload);
     if (!res.ok) {
       console.error('[slack-streamer] stopStream failed:', (res as any).error);
@@ -149,11 +151,12 @@ export class SlackStreamer {
     this.ts = (res as any).ts ?? null;
   }
 
-  /** Snapshot the buffer now, enqueue the actual HTTP send onto the chain. */
+  /** Snapshot the buffer now, enqueue the actual HTTP send onto the chain.
+   *  Chunks are sent as raw text — transform runs only on the final stopStream. */
   private _enqueueFlush(): void {
     this._clearTimer();
     if (!this.buffer) return;
-    const snapshot = this.transform(this.buffer);
+    const snapshot = this.buffer;
     this.buffer = '';
     this.flushChain = this.flushChain.then(() => this._sendChunk(snapshot));
   }
@@ -180,10 +183,9 @@ export class SlackStreamer {
     if (!res.ok) console.error('[slack-streamer] appendStream failed:', (res as any).error);
   }
 
-  /** Flush any remaining buffer (used by finish). */
   private _flushRemaining(): void {
     if (!this.buffer) return;
-    const snapshot = this.transform(this.buffer);
+    const snapshot = this.buffer;
     this.buffer = '';
     this.flushChain = this.flushChain.then(() => this._sendChunk(snapshot));
   }
