@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { resolve, basename, extname } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import { json } from 'itty-router';
 import { RouterWrapper } from 'edge.libx.js/build/main.js';
 import { augmentMcpWithSkillResource } from './mcp/with-skill-resource.ts';
@@ -75,6 +76,81 @@ export function createSlackMcp() {
       }>(token, 'chat.postMessage', payload);
       if (!data.ok) return json(data, { status: 400 });
       return json(data);
+    } catch (e) {
+      return json({ ok: false, error: errMessage(e) }, { status: 500 });
+    }
+  });
+
+  base.describeMCP('/slack/files', 'POST', {
+    description:
+      'Upload files to a Slack channel or thread. Reads files from local filesystem paths. Requires files:write bot scope.',
+    params: {
+      body: {
+        description:
+          '{ channel: string, files: Array<{path: string, filename?: string}>, thread_ts?: string, initial_comment?: string }',
+        type: 'object',
+      },
+    },
+    annotations: { destructiveHint: false },
+  });
+  router.post('/slack/files', async (req) => {
+    try {
+      const token = requireToken();
+      const body = (await req.json()) as Record<string, unknown>;
+      const channel = body.channel as string;
+      const files = body.files as Array<{ path: string; filename?: string }>;
+      if (!channel) return json({ ok: false, error: 'channel is required' }, { status: 400 });
+      if (!Array.isArray(files) || !files.length)
+        return json({ ok: false, error: 'files array is required and must not be empty' }, { status: 400 });
+
+      const uploaded: Array<{ id: string; title: string }> = [];
+      for (const f of files) {
+        if (!existsSync(f.path))
+          return json({ ok: false, error: `File not found: ${f.path}` }, { status: 400 });
+
+        const fileData = readFileSync(f.path);
+        const filename = f.filename ?? basename(f.path);
+        const length = fileData.byteLength;
+
+        const urlRes = await slackApi<{ upload_url: string; file_id: string }>(
+          token, 'files.getUploadURLExternal', { filename, length },
+        );
+        if (!urlRes.ok) return json(urlRes, { status: 400 });
+
+        const ext = extname(filename).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+          '.webp': 'image/webp', '.pdf': 'application/pdf', '.csv': 'text/csv',
+          '.json': 'application/json', '.txt': 'text/plain', '.zip': 'application/zip',
+        };
+        const contentType = mimeMap[ext] ?? 'application/octet-stream';
+
+        const putRes = await fetch(urlRes.upload_url, {
+          method: 'POST',
+          headers: { 'Content-Type': contentType },
+          body: fileData,
+        });
+        if (!putRes.ok) {
+          const text = await putRes.text().catch(() => 'unknown');
+          return json({ ok: false, error: `Upload failed for ${filename}: ${putRes.status} ${text}` }, { status: 502 });
+        }
+
+        uploaded.push({ id: urlRes.file_id, title: filename });
+      }
+
+      const completePayload: Record<string, unknown> = {
+        files: uploaded,
+        channel_id: channel,
+      };
+      if (typeof body.thread_ts === 'string') completePayload.thread_ts = body.thread_ts;
+      if (typeof body.initial_comment === 'string') completePayload.initial_comment = body.initial_comment;
+
+      const completeRes = await slackApi<{ ok: boolean }>(
+        token, 'files.completeUploadExternal', completePayload,
+      );
+      if (!completeRes.ok) return json(completeRes, { status: 400 });
+
+      return json({ ok: true, files: uploaded });
     } catch (e) {
       return json({ ok: false, error: errMessage(e) }, { status: 500 });
     }

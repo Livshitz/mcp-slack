@@ -27,6 +27,7 @@ Router base `''`; examples:
 - `get_slack_thread` — path `/slack/thread/:channel/:ts`; fetches thread replies
 - `get_slack_search` — query param **`q`** (not `query`); uses `SLACK_USER_TOKEN` when available
 - `post_slack_message` — body: `channel`, `text`, optional `thread_ts`, `blocks`
+- `post_slack_files` — upload local files to a channel/thread. Body: `{ channel, files: [{path, filename?}], thread_ts?, initial_comment? }`. Requires `files:write` bot scope.
 - `post_slack_dm_open` — body `{ "user": "U…" }`
 - `get_slack_user_by_email` — query `email`
 
