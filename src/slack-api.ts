@@ -52,3 +52,36 @@ export function requireUserToken(): string {
   if (!t) throw new Error('SLACK_USER_TOKEN is not set');
   return t;
 }
+
+const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const DOC_MIMES = new Set(['application/pdf']);
+export const SUPPORTED_FILE_MIMES = new Set([...IMAGE_MIMES, ...DOC_MIMES]);
+export const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+export interface SlackFile {
+  url_private: string;
+  mimetype: string;
+  name: string;
+  size: number;
+}
+
+export function isSupportedFile(f: SlackFile): boolean {
+  return SUPPORTED_FILE_MIMES.has(f.mimetype) && f.size <= MAX_FILE_SIZE;
+}
+
+export async function downloadFileBuffer(url: string, botToken: string, userToken?: string): Promise<Buffer> {
+  const tokens = [botToken, ...(userToken ? [userToken] : [])];
+  for (const token of tokens) {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.warn(`[mcp-slack] File download failed (${res.status}): ${url}`); continue; }
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('text/html')) { console.warn(`[mcp-slack] File download returned HTML (auth redirect?), retrying with next token`); continue; }
+    return Buffer.from(await res.arrayBuffer());
+  }
+  throw new Error(`Failed to download Slack file after ${tokens.length} token attempts: ${url}`);
+}
+
+export async function downloadFile(url: string, mimeType: string, botToken: string, userToken?: string): Promise<string> {
+  const buf = await downloadFileBuffer(url, botToken, userToken);
+  return `data:${mimeType};base64,${buf.toString('base64')}`;
+}
