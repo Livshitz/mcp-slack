@@ -371,14 +371,24 @@ export function createSlackMcp() {
     skillRelativePath: '.claude/skills/mcp-slack/SKILL.md',
   });
 
-  // Keep the agent's Slack user account appearing online
+  // Keep the agent's Slack user account appearing online (cleared by mcp.close() for ephemeral embeds)
+  let presencePingTimer: ReturnType<typeof setInterval> | undefined;
   const userToken = optionalUserToken();
   if (userToken) {
     const ping = () => slackApi(userToken, 'users.setPresence', { presence: 'auto' })
       .catch(e => console.error('[mcp-slack] setPresence failed:', e));
     ping();
-    setInterval(ping, 5 * 60 * 1000);
+    presencePingTimer = setInterval(ping, 5 * 60 * 1000);
   }
+
+  Object.assign(mcp, {
+    close: async (): Promise<void> => {
+      if (presencePingTimer != null) {
+        clearInterval(presencePingTimer);
+        presencePingTimer = undefined;
+      }
+    },
+  });
 
   async function httpFetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
