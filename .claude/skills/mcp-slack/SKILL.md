@@ -28,6 +28,7 @@ Router base `''`; examples:
 - `get_slack_search` — query param **`q`** (not `query`); uses `SLACK_USER_TOKEN` when available
 - `post_slack_message` — body: `channel`, `text`, optional `thread_ts`, `blocks`
 - `post_slack_files` — upload local files to a channel/thread. Body: `{ channel, files: [{path, filename?}], thread_ts?, initial_comment? }`. Requires `files:write` bot scope.
+- `post_slack_poll` — post an interactive poll or directed question (clickable option buttons + live tally + Close button). Body: `{ channel, title, options: [{label, description?}] (2-10), kind?: "poll"|"question", multi?, target_user? (U…, question only), deadline_minutes?, quorum?, thread_ts? }`. Returns `{ pollId, ts, channel, … }`. **Requires a host that owns vote state + a Slack interactivity Request URL** (in unclaw: votes are tracked server-side and the creating agent is woken with the tally on close — deadline/quorum/manual for polls, first answer for questions). Posting it standalone (no host) renders buttons but clicks won't be recorded.
 - `post_slack_dm_open` — body `{ "user": "U…" }`
 - `get_slack_user_by_email` — query `email`
 

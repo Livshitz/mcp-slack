@@ -4,6 +4,7 @@ import { json } from 'itty-router';
 import { RouterWrapper } from 'edge.libx.js/build/main.js';
 import { augmentMcpWithSkillResource } from './mcp/with-skill-resource.ts';
 import { requireToken, optionalUserToken, slackApi } from './slack-api.ts';
+import { buildPollBlocks, type PollSpec, type PollKind, type PollOption } from './poll-blocks.ts';
 import { slimChannels, slimHistory, slimSearch } from './slim.ts';
 import { inlineOrSpool } from './spool.ts';
 import { registerDmUserRoutes } from './routes-dm.ts';
@@ -76,6 +77,51 @@ export function createSlackMcp() {
       }>(token, 'chat.postMessage', payload);
       if (!data.ok) return json(data, { status: 400 });
       return json(data);
+    } catch (e) {
+      return json({ ok: false, error: errMessage(e) }, { status: 500 });
+    }
+  });
+
+  base.describeMCP('/slack/poll', 'POST', {
+    description:
+      'Post an interactive poll or directed question to a Slack channel/DM. Renders clickable option buttons with a live vote tally and a Close button. Returns a pollId; the host app records votes (via Slack interactivity), updates the tally live, and closes the poll on deadline/quorum (poll) or first answer (question). Use kind="poll" for a multi-user vote, kind="question" to ask one person (set target_user to their U… id). channel is C/G/D id (resolve names/emails first).',
+    params: {
+      body: {
+        description:
+          '{ channel: string, title: string, options: Array<{label: string, description?: string}> (2-10), kind?: "poll"|"question" (default poll), multi?: boolean (poll only), target_user?: string (U… id, question only), thread_ts?: string, deadline_minutes?: number (auto-close + report results after N minutes), quorum?: number (auto-close once this many people have voted) }. A poll closes on deadline OR quorum (whichever first) OR manual Close; a question closes on first answer. On close the agent that created it is notified with the tally.',
+        type: 'object',
+      },
+    },
+    annotations: { destructiveHint: false },
+  });
+  router.post('/slack/poll', async (req) => {
+    try {
+      const token = requireToken();
+      const body = (await req.json()) as Record<string, unknown>;
+      const channel = body.channel;
+      const title = body.title;
+      const options = body.options as PollOption[] | undefined;
+      if (typeof channel !== 'string' || !channel)
+        return json({ ok: false, error: 'channel is required' }, { status: 400 });
+      if (typeof title !== 'string' || !title)
+        return json({ ok: false, error: 'title is required' }, { status: 400 });
+      if (!Array.isArray(options) || options.length < 2 || options.length > 10)
+        return json({ ok: false, error: 'options must be an array of 2-10 {label,description?}' }, { status: 400 });
+
+      const kind: PollKind = body.kind === 'question' ? 'question' : 'poll';
+      const spec: PollSpec = {
+        pollId: crypto.randomUUID().slice(0, 8),
+        title,
+        options: options.map((o) => ({ label: String((o as any).label ?? ''), description: (o as any).description })),
+        kind,
+        multi: kind === 'poll' ? !!body.multi : false,
+        targetUser: typeof body.target_user === 'string' ? body.target_user : undefined,
+      };
+      const payload: Record<string, unknown> = { channel, text: spec.title, blocks: buildPollBlocks(spec) };
+      if (typeof body.thread_ts === 'string') payload.thread_ts = body.thread_ts;
+      const data = await slackApi<{ channel?: string; ts?: string }>(token, 'chat.postMessage', payload);
+      if (!data.ok) return json(data, { status: 400 });
+      return json({ ok: true, pollId: spec.pollId, channel: data.channel ?? channel, ts: data.ts, kind: spec.kind, multi: spec.multi, targetUser: spec.targetUser, options: spec.options });
     } catch (e) {
       return json({ ok: false, error: errMessage(e) }, { status: 500 });
     }
