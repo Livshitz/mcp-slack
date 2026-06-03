@@ -5,7 +5,7 @@
     "": {
       "name": "mcp-slack",
       "dependencies": {
-        "edge.libx.js": "^0.5.0",
+        "edge.libx.js": "^0.6.2",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -108,7 +108,7 @@
 
     "dunder-proto": ["dunder-proto@1.0.1", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.1", "es-errors": "^1.3.0", "gopd": "^1.2.0" } }, "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A=="],
 
-    "edge.libx.js": ["edge.libx.js@0.5.3", "", { "dependencies": { "@vercel/edge": "^1.1.2", "@whatwg-node/server": "^0.9.49", "body-parser": "^1.20.3", "express": "^4.21.1", "isomorphic-fetch": "^3.0.0", "itty-router": "^5.0.18", "js-base64": "^3.7.7", "libx.js": "^5.1.2", "selfsigned": "^2.4.1", "ua-parser-js": "^1.0.39" }, "bin": { "set-secrets": "bin/set-secrets.ts" } }, "sha512-I8gzkszSTLqOkJsuwrTOvHIkJ6EEPbyB0Dthw7ZL5Glk1G8+pfz9C606ZDGE4Q0mcGjDgb/sg5FmYbnrcz63/A=="],
+    "edge.libx.js": ["edge.libx.js@0.6.2", "", { "dependencies": { "@vercel/edge": "^1.1.2", "@whatwg-node/server": "^0.9.49", "body-parser": "^1.20.3", "express": "^4.21.1", "isomorphic-fetch": "^3.0.0", "itty-router": "^5.0.18", "js-base64": "^3.7.7", "libx.js": "^5.1.2", "selfsigned": "^2.4.1", "ua-parser-js": "^1.0.39" }, "bin": { "set-secrets": "bin/set-secrets.ts" } }, "sha512-qdn1ExLXmw86MA6fbu0clR88TDJqgJJiIcY9TBmbnCm/FU0UTXeDdNNJraMxD5PNv3VOSGrKnW9U8zTkzecrDA=="],
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
