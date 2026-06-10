@@ -55,8 +55,17 @@ export function requireUserToken(): string {
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const DOC_MIMES = new Set(['application/pdf']);
-export const SUPPORTED_FILE_MIMES = new Set([...IMAGE_MIMES, ...DOC_MIMES]);
+// Audio (voice messages, recordings). Downloaded + passed by path — the agent transcribes
+// via mcp-audio rather than inlining (the model can't ingest audio directly).
+const AUDIO_MIMES = new Set(['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/flac']);
+export const SUPPORTED_FILE_MIMES = new Set([...IMAGE_MIMES, ...DOC_MIMES, ...AUDIO_MIMES]);
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
+// Groq/OpenAI whisper accept up to 25MB — allow larger audio than inline image/doc.
+export const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
+
+export function isAudioFile(f: { mimetype: string }): boolean {
+  return AUDIO_MIMES.has(f.mimetype);
+}
 
 export interface SlackFile {
   url_private: string;
@@ -66,7 +75,8 @@ export interface SlackFile {
 }
 
 export function isSupportedFile(f: SlackFile): boolean {
-  return SUPPORTED_FILE_MIMES.has(f.mimetype) && f.size <= MAX_FILE_SIZE;
+  if (!SUPPORTED_FILE_MIMES.has(f.mimetype)) return false;
+  return f.size <= (isAudioFile(f) ? MAX_AUDIO_SIZE : MAX_FILE_SIZE);
 }
 
 export async function downloadFileBuffer(url: string, botToken: string, userToken?: string): Promise<Buffer> {
