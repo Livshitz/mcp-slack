@@ -47,11 +47,12 @@ export function createSlackMcp() {
 
   base.describeMCP('/slack/message', 'POST', {
     description:
-      'Post as the Slack app bot (SLACK_BOT_TOKEN must be xoxb- Bot User OAuth; xoxp- posts as that human). Channel C…/G… or DM D…. New DM: GET /slack/user/by-email if needed, POST /slack/dm/open with U…, then post with channel = channel_id. Raw @name or email will fail.',
+      'Post as the Slack app bot (SLACK_BOT_TOKEN must be xoxb- Bot User OAuth; xoxp- posts as that human). Channel C…/G… or DM D…. New DM: GET /slack/user/by-email if needed, POST /slack/dm/open with U…, then post with channel = channel_id. Raw @name or email will fail. ' +
+      'FORMATTING: `text` is Slack mrkdwn, NOT markdown — Slack does NOT render markdown tables (pipe `|` rows show as raw text). Wrap any table/aligned data in a triple-backtick code fence (monospace, space-pad the columns) and use *single asterisks* for bold (not **double**), _underscores_ for italic.',
     params: {
       body: {
         description:
-          '{ channel, text, optional thread_ts, optional blocks } — channel is C/G/D id or from dm/open',
+          '{ channel, text, optional thread_ts, optional blocks } — channel is C/G/D id or from dm/open. text = Slack mrkdwn: *bold* (single *), code-fence tables (no markdown pipe-tables — they render as raw `|`).',
         type: 'object',
       },
     },

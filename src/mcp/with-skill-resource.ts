@@ -8,8 +8,11 @@ type JsonRpcRequest = {
   params?: unknown;
 };
 
+// Loose on purpose: adapters pass extra args (e.g. a progress-notification sink)
+// that the wrapper must forward untouched.
 export type McpAdapterLike = {
-  handleJsonRpc: (message: JsonRpcRequest) => Promise<unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handleJsonRpc: (message: any, ...rest: any[]) => Promise<any>;
 };
 
 /**
@@ -25,7 +28,7 @@ export function augmentMcpWithSkillResource(adapter: McpAdapterLike, opts: {
   const skillAbsPath = resolve(opts.repoRootAbs, opts.skillRelativePath);
   const orig = adapter.handleJsonRpc.bind(adapter);
 
-  adapter.handleJsonRpc = async (message: JsonRpcRequest): Promise<unknown> => {
+  adapter.handleJsonRpc = async (message: JsonRpcRequest, ...rest: unknown[]): Promise<unknown> => {
     const { method, id, params } = message;
 
     if (method === 'resources/list') {
@@ -84,7 +87,7 @@ export function augmentMcpWithSkillResource(adapter: McpAdapterLike, opts: {
       };
     }
 
-    const res = (await orig(message)) as {
+    const res = (await orig(message, ...rest)) as {
       jsonrpc?: string;
       id?: unknown;
       result?: {
