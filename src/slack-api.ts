@@ -58,7 +58,21 @@ const DOC_MIMES = new Set(['application/pdf']);
 // Audio (voice messages, recordings). Downloaded + passed by path — the agent transcribes
 // via mcp-audio rather than inlining (the model can't ingest audio directly).
 const AUDIO_MIMES = new Set(['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/flac']);
-export const SUPPORTED_FILE_MIMES = new Set([...IMAGE_MIMES, ...DOC_MIMES, ...AUDIO_MIMES]);
+// Plain-text files (docs, data, config, source). Downloaded + passed by path — the agent
+// reads them with the Read tool (the model ingests text directly, no inlining needed).
+const TEXT_MIMES = new Set([
+  'text/markdown', 'text/html', 'text/plain', 'text/csv', 'text/tab-separated-values',
+  'text/xml', 'application/xml', 'application/json', 'text/yaml', 'application/x-yaml',
+  'text/css', 'text/javascript', 'application/javascript', 'application/x-sh', 'text/x-python',
+]);
+// Slack's mimetype detection is unreliable for snippets/code (often text/plain or
+// application/octet-stream), so we also accept by extension.
+const TEXT_EXTENSIONS = [
+  '.md', '.markdown', '.html', '.htm', '.txt', '.text', '.csv', '.tsv', '.json',
+  '.xml', '.yaml', '.yml', '.toml', '.ini', '.env', '.css', '.js', '.mjs', '.cjs',
+  '.ts', '.tsx', '.jsx', '.py', '.sh', '.bash', '.sql', '.log',
+];
+export const SUPPORTED_FILE_MIMES = new Set([...IMAGE_MIMES, ...DOC_MIMES, ...AUDIO_MIMES, ...TEXT_MIMES]);
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
 // Groq/OpenAI whisper accept up to 25MB — allow larger audio than inline image/doc.
 export const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
@@ -74,18 +88,27 @@ export interface SlackFile {
   size: number;
 }
 
+/** Text/markup/code file the agent can Read directly (by mimetype or filename extension). */
+export function isTextFile(f: { mimetype: string; name?: string }): boolean {
+  if (TEXT_MIMES.has(f.mimetype)) return true;
+  const name = (f.name ?? '').toLowerCase();
+  return TEXT_EXTENSIONS.some(ext => name.endsWith(ext));
+}
+
 export function isSupportedFile(f: SlackFile): boolean {
-  if (!SUPPORTED_FILE_MIMES.has(f.mimetype)) return false;
+  if (!SUPPORTED_FILE_MIMES.has(f.mimetype) && !isTextFile(f)) return false;
   return f.size <= (isAudioFile(f) ? MAX_AUDIO_SIZE : MAX_FILE_SIZE);
 }
 
-export async function downloadFileBuffer(url: string, botToken: string, userToken?: string): Promise<Buffer> {
+export async function downloadFileBuffer(url: string, botToken: string, userToken?: string, allowHtml?: boolean): Promise<Buffer> {
   const tokens = [botToken, ...(userToken ? [userToken] : [])];
   for (const token of tokens) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) { console.warn(`[mcp-slack] File download failed (${res.status}): ${url}`); continue; }
     const ct = res.headers.get('content-type') || '';
-    if (ct.includes('text/html')) { console.warn(`[mcp-slack] File download returned HTML (auth redirect?), retrying with next token`); continue; }
+    // A text/html response usually means an auth-redirect login page — but a genuine .html
+    // file also downloads as text/html, so skip this guard when the caller expects HTML.
+    if (!allowHtml && ct.includes('text/html')) { console.warn(`[mcp-slack] File download returned HTML (auth redirect?), retrying with next token`); continue; }
     return Buffer.from(await res.arrayBuffer());
   }
   throw new Error(`Failed to download Slack file after ${tokens.length} token attempts: ${url}`);
