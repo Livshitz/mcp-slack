@@ -48,7 +48,8 @@ export function createSlackMcp() {
   base.describeMCP('/slack/message', 'POST', {
     description:
       'Post as the Slack app bot (SLACK_BOT_TOKEN must be xoxb- Bot User OAuth; xoxp- posts as that human). Channel C…/G… or DM D…. New DM: GET /slack/user/by-email if needed, POST /slack/dm/open with U…, then post with channel = channel_id. Raw @name or email will fail. ' +
-      'FORMATTING: `text` is Slack mrkdwn, NOT markdown — Slack does NOT render markdown tables (pipe `|` rows show as raw text). Wrap any table/aligned data in a triple-backtick code fence (monospace, space-pad the columns) and use *single asterisks* for bold (not **double**), _underscores_ for italic.',
+      'FORMATTING: `text` is Slack mrkdwn, NOT markdown — Slack does NOT render markdown tables (pipe `|` rows show as raw text). Wrap any table/aligned data in a triple-backtick code fence (monospace, space-pad the columns) and use *single asterisks* for bold (not **double**), _underscores_ for italic. ' +
+      'Returns { channel, ts } — keep the ts to later EDIT this message via post_slack_update or remove it via post_slack_delete (this app can edit/delete its own posts — bot or user identity; prefer editing over posting a correction).',
     params: {
       body: {
         description:
@@ -76,6 +77,101 @@ export function createSlackMcp() {
         ts?: string;
         message?: { text?: string };
       }>(token, 'chat.postMessage', payload);
+      if (!data.ok) return json(data, { status: 400 });
+      return json(data);
+    } catch (e) {
+      return json({ ok: false, error: errMessage(e) }, { status: 500 });
+    }
+  });
+
+  // chat.update/chat.delete only succeed for the token that AUTHORED the message.
+  // In unclaw the bot (xoxb) and the agent's user account (xoxp) BOTH post — so try the
+  // requested identity first, then fall back to the other token on an author-mismatch error.
+  // Errors that mean "this token can't act here, but the other token might" — wrong author
+  // (cant_update/delete_message), or the token can't see the conversation at all
+  // (channel_not_found/not_in_channel, e.g. a DM the bot isn't a member of).
+  const AUTHOR_MISMATCH = new Set([
+    'cant_update_message', 'cant_delete_message', 'message_not_found',
+    'edit_window_closed', 'message_not_authored_by_user',
+    'channel_not_found', 'not_in_channel',
+  ]);
+  async function editWithFallback<T extends { ok: boolean; error?: string }>(
+    method: string, payload: Record<string, unknown>, asUser?: boolean,
+  ): Promise<T> {
+    const bot = requireToken();
+    const user = optionalUserToken();
+    // Order tokens by requested identity; dedupe when no distinct user token exists.
+    const order = asUser && user ? [user, bot] : [bot, ...(user ? [user] : [])];
+    let last: T | undefined;
+    for (const token of order) {
+      last = await slackApi<T>(token, method, payload) as T;
+      if (last.ok || !AUTHOR_MISMATCH.has(last.error ?? '')) return last;
+    }
+    return last as T;
+  }
+
+  base.describeMCP('/slack/update', 'POST', {
+    description:
+      'Edit a message previously posted by THIS app (chat.update) — correct/replace a prior post instead of adding a follow-up. Works for messages authored by either the bot (xoxb) or the agent\'s user account (xoxp); it auto-tries both, so you normally do NOT need as_user. Cannot edit other people\'s messages. ' +
+      'FORMATTING: same as post_slack_message — `text` is Slack mrkdwn (*single-asterisk* bold, no markdown pipe-tables; wrap tables in a triple-backtick code fence).',
+    params: {
+      body: {
+        description:
+          '{ channel: string (C/G/D id, same channel the message is in), ts: string (the target message ts to edit), text?: string, blocks?: array, as_user?: boolean } — provide text and/or blocks (at least one). Passing blocks without text replaces the blocks. as_user=true tries the user token first (rarely needed; both tokens are tried automatically).',
+        type: 'object',
+      },
+    },
+    annotations: { destructiveHint: false },
+  });
+  router.post('/slack/update', async (req) => {
+    try {
+      const body = (await req.json()) as Record<string, unknown>;
+      const channel = body.channel;
+      const ts = body.ts;
+      if (typeof channel !== 'string' || !channel)
+        return json({ ok: false, error: 'channel is required' }, { status: 400 });
+      if (typeof ts !== 'string' || !ts)
+        return json({ ok: false, error: 'ts is required (the message timestamp to edit)' }, { status: 400 });
+      const hasText = typeof body.text === 'string' && body.text;
+      const hasBlocks = body.blocks != null;
+      if (!hasText && !hasBlocks)
+        return json({ ok: false, error: 'text and/or blocks is required' }, { status: 400 });
+      const payload: Record<string, unknown> = { channel, ts };
+      if (hasText) payload.text = body.text;
+      if (hasBlocks) payload.blocks = body.blocks;
+      const data = await editWithFallback<{ ok: boolean; error?: string; channel?: string; ts?: string; text?: string }>(
+        'chat.update', payload, body.as_user === true,
+      );
+      if (!data.ok) return json(data, { status: 400 });
+      return json(data);
+    } catch (e) {
+      return json({ ok: false, error: errMessage(e) }, { status: 500 });
+    }
+  });
+
+  base.describeMCP('/slack/delete', 'POST', {
+    description:
+      'Delete a message previously posted by THIS app (chat.delete) — remove an erroneous/stale post. Works for messages authored by either the bot (xoxb) or the agent\'s user account (xoxp); it auto-tries both. Cannot delete other people\'s messages.',
+    params: {
+      body: {
+        description: '{ channel: string (C/G/D id), ts: string (the message ts to delete), as_user?: boolean (tries user token first; rarely needed) }',
+        type: 'object',
+      },
+    },
+    annotations: { destructiveHint: true },
+  });
+  router.post('/slack/delete', async (req) => {
+    try {
+      const body = (await req.json()) as Record<string, unknown>;
+      const channel = body.channel;
+      const ts = body.ts;
+      if (typeof channel !== 'string' || !channel)
+        return json({ ok: false, error: 'channel is required' }, { status: 400 });
+      if (typeof ts !== 'string' || !ts)
+        return json({ ok: false, error: 'ts is required (the message timestamp to delete)' }, { status: 400 });
+      const data = await editWithFallback<{ ok: boolean; error?: string; channel?: string; ts?: string }>(
+        'chat.delete', { channel, ts }, body.as_user === true,
+      );
       if (!data.ok) return json(data, { status: 400 });
       return json(data);
     } catch (e) {
@@ -409,7 +505,7 @@ export function createSlackMcp() {
     name: 'mcp-slack',
     version: '0.1.0',
     instructions:
-      'Slack: post_message needs real ids (C/G/D). DM flow: get_slack_users (search by name) or get_slack_user_by_email → get user ID (U…) → post_slack_dm_open → post_slack_message with D… channel_id. Prefer get_slack_users over by-email when you don\'t know the exact email. Thread replies: get_slack_thread with channel + parent ts. Search (q param): requires SLACK_USER_TOKEN (xoxp-); auto-used when set. Invite bot to channels for is_member true. Large payloads: spooled file path. Full workflows: MCP resource skill://mcp-slack/workflow.',
+      'Slack: post_message needs real ids (C/G/D). DM flow: get_slack_users (search by name) or get_slack_user_by_email → get user ID (U…) → post_slack_dm_open → post_slack_message with D… channel_id. Prefer get_slack_users over by-email when you don\'t know the exact email. Thread replies: get_slack_thread with channel + parent ts. EDIT/DELETE: this app CAN edit and delete its own messages (whether posted as the bot or as the agent\'s user account — both tokens are tried automatically) — post_slack_update { channel, ts, text/blocks } and post_slack_delete { channel, ts }; the ts comes from post_slack_message\'s return. Prefer editing over posting a "Correction:" follow-up. Search (q param): requires SLACK_USER_TOKEN (xoxp-); auto-used when set. Invite bot to channels for is_member true. Large payloads: spooled file path. Full workflows: MCP resource skill://mcp-slack/workflow.',
   });
 
   augmentMcpWithSkillResource(mcp, {

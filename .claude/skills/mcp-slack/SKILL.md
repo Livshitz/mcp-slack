@@ -26,7 +26,9 @@ Router base `''`; examples:
 - `get_slack_channels`, `get_slack_history_by_channel` (path `/slack/history/:channel`; pass channel id in the path)
 - `get_slack_thread` — path `/slack/thread/:channel/:ts`; fetches thread replies
 - `get_slack_search` — query param **`q`** (not `query`); uses `SLACK_USER_TOKEN` when available
-- `post_slack_message` — body: `channel`, `text`, optional `thread_ts`, `blocks`
+- `post_slack_message` — body: `channel`, `text`, optional `thread_ts`, `blocks`. Returns `{ channel, ts }` — keep `ts` to later edit/delete.
+- `post_slack_update` — **edit a message this app posted** (`chat.update`). Body: `{ channel, ts, text?, blocks?, as_user? }` (at least one of text/blocks). Works for messages authored by **either** the bot (xoxb) **or** the agent's user account (xoxp) — it auto-tries both tokens, so `as_user` is rarely needed. Cannot edit other people's messages. Prefer editing over posting a "Correction:" follow-up.
+- `post_slack_delete` — delete a message this app posted (`chat.delete`). Body: `{ channel, ts, as_user? }`. Same dual-token auto-fallback as update.
 - `post_slack_files` — upload local files to a channel/thread. Body: `{ channel, files: [{path, filename?}], thread_ts?, initial_comment? }`. Requires `files:write` bot scope.
 - `post_slack_poll` — post an interactive poll or directed question (clickable option buttons + live tally + Close button). Body: `{ channel, title, options: [{label, description?}] (2-10), kind?: "poll"|"question", multi?, target_user? (U…, question only), deadline_minutes?, quorum?, thread_ts? }`. Returns `{ pollId, ts, channel, … }`. **Requires a host that owns vote state + a Slack interactivity Request URL** (in unclaw: votes are tracked server-side and the creating agent is woken with the tally on close — deadline/quorum/manual for polls, first answer for questions). Posting it standalone (no host) renders buttons but clicks won't be recorded.
 - `post_slack_dm_open` — body `{ "user": "U…" }`
