@@ -9,6 +9,14 @@ bun run src/mcp/cli.ts --stdio     # stdio mode (for MCP integration)
 bun run src/mcp/cli.ts --port 3840 # HTTP mode
 ```
 
+## Add to your MCP host
+
+Wire the server into an MCP host (Claude Code, Cursor, …) by adding it to your `.mcp.json` (or run `claude mcp add`):
+
+```json
+{ "mcpServers": { "slack": { "command": "bunx", "args": ["mcp-slack", "--stdio"], "env": { "SLACK_BOT_TOKEN": "xoxb-..." } } } }
+```
+
 ## Env Vars
 
 | Variable | Required | Description |
