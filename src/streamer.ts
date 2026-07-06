@@ -45,6 +45,8 @@ export class SlackStreamer {
   private startPromise: Promise<void> | null = null;
   private flushChain: Promise<void> = Promise.resolve();
   private afterTool = false;
+  private taskSeq = 0;
+  private taskUpdatesDisabled = false;
 
   public ts: string | null = null;
   public readonly flat: boolean;
@@ -216,15 +218,29 @@ export class SlackStreamer {
 
   private async _doToolUpdate(tool: string): Promise<void> {
     if (this.startPromise) await this.startPromise;
-    if (!this.ts || this.aborted) return;
+    if (!this.ts || this.aborted || this.taskUpdatesDisabled) return;
 
-    const label = tool.length > 250 ? tool.slice(0, 250) + '…' : tool;
+    // Slack's task_update chunk schema is { type, id, title, status, details?, output? } — NOT { text }.
+    // The 256-char cap applies to task_update/plan_update chunks.
+    // https://docs.slack.dev/reference/methods/chat.appendStream/
+    const title = tool.length > 250 ? tool.slice(0, 250) + '…' : tool;
     const res = await slackApi(this.botToken, 'chat.appendStream', {
       channel: this.channel,
       ts: this.ts,
-      chunks: [{ type: 'task_update', text: label }],
+      chunks: [{ type: 'task_update', id: `t${++this.taskSeq}`, title, status: 'in_progress' }],
     });
-    if (!res.ok) console.error('[slack-streamer] task_update failed:', (res as any).error);
+    if (!res.ok) {
+      const err = (res as any).error;
+      // Feature-detect: a schema/param rejection means this stream will never accept task_update
+      // chunks — disable it so we don't log the same error on every tool call (the stream itself keeps
+      // working via text appends). Transient errors (rate limits, 5xx) are left to retry next tool.
+      if (err === 'invalid_arguments' || err === 'invalid_blocks') {
+        this.taskUpdatesDisabled = true;
+        console.error('[slack-streamer] task_update unsupported for this stream, disabling:', err);
+      } else {
+        console.error('[slack-streamer] task_update failed:', err);
+      }
+    }
   }
 
   private async _postMessage(text: string): Promise<string | null> {
