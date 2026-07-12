@@ -2,6 +2,23 @@
 
 MCP server for the Slack API — channels, messages, search, DMs, and reactions.
 
+## Changelog
+
+- **0.6.0** — Additive host-app surface (outbound MCP tool contract unchanged):
+  - `src/client.ts` — unified Slack Web API for host apps (one bot-vs-user token-resolution
+    path): `slackPost` / `postMessage` / reactions / thread + history reads / channel + user
+    lookups / file hydrate (`getFileInfo`) + download (`downloadSlackFileBuffer`) / identity
+    (`getBotUserId` / `getBotId` / `getAgentUserId`). Re-exports `buildPollBlocks` and the file
+    helpers from `slack-api.ts`. Contact/mention resolution stays in the host.
+  - `src/ingress.ts` — inbound Slack protocol: `registerSlackIngress(app, { onMessage,
+    onInteraction, shouldRespond?, onReplied?, finalTransform? })` owning
+    `/api/slack/events` + `/api/slack/interactivity`, rawBody + HMAC verify, url_verification,
+    bot-echo skip, dedupe, DM identity → `useUserToken`, file hydrate, per-thread FIFO queue,
+    hourglass reaction lifecycle, and SlackStreamer wiring. `onMessage` returns
+    `AsyncIterable<AgentEvent>` (`text_delta` / `tool_use` / `tool_result` / `done` / `error`);
+    the package pipes it through its own `SlackStreamer`. Also exports `pipeAgentReply` (reuse
+    the streamer wiring from a host recovery path) and `mdToMrkdwn`.
+
 ## Usage
 
 ```bash
