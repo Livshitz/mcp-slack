@@ -24,8 +24,8 @@ export interface SlackStreamerOptions {
   finalTransform?: (text: string) => Promise<string>;
   flushInterval?: number;
   flushThreshold?: number;
-  /** Opt in to `task_update` tool-progress chunks. Off by default — see `taskUpdatesDisabled`. */
-  taskUpdates?: boolean;
+  /** Show a transient inline marker for each tool the agent calls, streamed in-band. Default on. */
+  toolMarkers?: boolean;
 }
 
 export class SlackStreamer {
@@ -47,12 +47,7 @@ export class SlackStreamer {
   private startPromise: Promise<void> | null = null;
   private flushChain: Promise<void> = Promise.resolve();
   private afterTool = false;
-  private taskSeq = 0;
-  // Disabled by default: interleaving `task_update` chunks with `markdown_text` appends on the same
-  // stream makes Slack reject the mode switch (`streaming_mode_mismatch`), which drops the message out
-  // of streaming state → every subsequent `appendStream` fails `message_not_in_streaming_state`. Keep
-  // the stream pure-text until per-stream mode handling exists. Opt back in via `taskUpdates: true`.
-  private taskUpdatesDisabled: boolean;
+  private toolMarkers: boolean;
 
   public ts: string | null = null;
   public readonly flat: boolean;
@@ -69,7 +64,7 @@ export class SlackStreamer {
     this.finalTransform = options.finalTransform;
     this.flushInterval = options.flushInterval ?? 300;
     this.flushThreshold = options.flushThreshold ?? 30;
-    this.taskUpdatesDisabled = !options.taskUpdates;
+    this.toolMarkers = options.toolMarkers ?? true;
     this.flat = !options.threadTs;
   }
 
@@ -225,29 +220,20 @@ export class SlackStreamer {
 
   private async _doToolUpdate(tool: string): Promise<void> {
     if (this.startPromise) await this.startPromise;
-    if (!this.ts || this.aborted || this.taskUpdatesDisabled) return;
+    if (!this.ts || this.aborted || !this.toolMarkers) return;
 
-    // Slack's task_update chunk schema is { type, id, title, status, details?, output? } — NOT { text }.
-    // The 256-char cap applies to task_update/plan_update chunks.
-    // https://docs.slack.dev/reference/methods/chat.appendStream/
-    const title = tool.length > 250 ? tool.slice(0, 250) + '…' : tool;
+    // Tool progress is streamed IN-BAND as a `markdown_text` append — the SAME stream mode as the
+    // text chunks. Do NOT use `task_update`/`plan_update` structured chunks here: Slack treats a stream
+    // as single-mode, so a chunk append after markdown_text is rejected with `streaming_mode_mismatch`,
+    // which drops the message out of streaming state and breaks every later append. The marker is
+    // transient — `finish()` replaces the whole message with the clean transformed text via chat.update.
+    const title = tool.length > 200 ? tool.slice(0, 200) + '…' : tool;
     const res = await slackApi(this.botToken, 'chat.appendStream', {
       channel: this.channel,
       ts: this.ts,
-      chunks: [{ type: 'task_update', id: `t${++this.taskSeq}`, title, status: 'in_progress' }],
+      markdown_text: `\n\n_🔧 ${title}_\n\n`,
     });
-    if (!res.ok) {
-      const err = (res as any).error;
-      // Feature-detect: a schema/param rejection means this stream will never accept task_update
-      // chunks — disable it so we don't log the same error on every tool call (the stream itself keeps
-      // working via text appends). Transient errors (rate limits, 5xx) are left to retry next tool.
-      if (err === 'invalid_arguments' || err === 'invalid_blocks') {
-        this.taskUpdatesDisabled = true;
-        console.error('[slack-streamer] task_update unsupported for this stream, disabling:', err);
-      } else {
-        console.error('[slack-streamer] task_update failed:', err);
-      }
-    }
+    if (!res.ok) console.error('[slack-streamer] tool marker failed:', (res as any).error);
   }
 
   private async _postMessage(text: string): Promise<string | null> {
