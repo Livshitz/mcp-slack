@@ -24,6 +24,8 @@ export interface SlackStreamerOptions {
   finalTransform?: (text: string) => Promise<string>;
   flushInterval?: number;
   flushThreshold?: number;
+  /** Opt in to `task_update` tool-progress chunks. Off by default — see `taskUpdatesDisabled`. */
+  taskUpdates?: boolean;
 }
 
 export class SlackStreamer {
@@ -46,7 +48,11 @@ export class SlackStreamer {
   private flushChain: Promise<void> = Promise.resolve();
   private afterTool = false;
   private taskSeq = 0;
-  private taskUpdatesDisabled = false;
+  // Disabled by default: interleaving `task_update` chunks with `markdown_text` appends on the same
+  // stream makes Slack reject the mode switch (`streaming_mode_mismatch`), which drops the message out
+  // of streaming state → every subsequent `appendStream` fails `message_not_in_streaming_state`. Keep
+  // the stream pure-text until per-stream mode handling exists. Opt back in via `taskUpdates: true`.
+  private taskUpdatesDisabled: boolean;
 
   public ts: string | null = null;
   public readonly flat: boolean;
@@ -63,6 +69,7 @@ export class SlackStreamer {
     this.finalTransform = options.finalTransform;
     this.flushInterval = options.flushInterval ?? 300;
     this.flushThreshold = options.flushThreshold ?? 30;
+    this.taskUpdatesDisabled = !options.taskUpdates;
     this.flat = !options.threadTs;
   }
 
