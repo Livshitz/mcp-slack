@@ -6,7 +6,7 @@ description: >-
   configuring MCP/HTTP, or troubleshooting Slack API errors.
 when_to_use: >-
   mcp-slack-use, SLACK_BOT_TOKEN, xoxb, chat.postMessage, conversations, Slack MCP,
-  DM open, lookupByEmail, spool, MCP_SLACK_CACHE_DIR.
+  DM open, lookupByEmail, spool, MCP_SLACK_USE_CACHE_DIR.
 paths: "src/**/*.ts,package.json"
 ---
 
@@ -17,7 +17,7 @@ paths: "src/**/*.ts,package.json"
 - **Entry**: `src/mcp/cli.ts` — `--stdio` (default in `package.json` `start`) or HTTP (`--http`, default port **3840**). MCP: `POST /mcp`; REST includes `/health`, `/slack/*`.
 - **App factory**: `createSlackMcp()` in `src/app.ts`; DM/user routes in `src/routes-dm.ts`. When embedding in short-lived Bun scripts with `SLACK_USER_TOKEN`, call `await mcp.close()` when done so the internal presence ping interval cannot keep the process alive.
 - **API**: `slackApi()` in `src/slack-api.ts` — dual-token: `requireToken()` for bot (`SLACK_BOT_TOKEN`, `xoxb-`), `optionalUserToken()` for user (`SLACK_USER_TOKEN`, `xoxp-`). Search auto-prefers user token when set.
-- **Large JSON**: `inlineOrSpool()` (`src/spool.ts`) — over **`MCP_SLACK_SPOOL_THRESHOLD`** (default 12_000 chars), JSON is written to **`MCP_SLACK_CACHE_DIR`** (default `.mcp-slack/cache`) and the handler returns **`{ spooled: true, file, sizeBytes, summary, hint, ok }`**; otherwise the payload is returned inline.
+- **Large JSON**: `inlineOrSpool()` (`src/spool.ts`) — over **`MCP_SLACK_USE_SPOOL_THRESHOLD`** (default 12_000 chars; old `MCP_SLACK_SPOOL_THRESHOLD` still accepted), JSON is written to **`MCP_SLACK_USE_CACHE_DIR`** (default `.mcp-slack-use/cache`; old `MCP_SLACK_CACHE_DIR` still accepted) and the handler returns **`{ spooled: true, file, sizeBytes, summary, hint, ok }`**; otherwise the payload is returned inline.
 
 ## MCP tool names (method + path)
 

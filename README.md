@@ -40,8 +40,8 @@ Wire the server into an MCP host (Claude Code, Cursor, …) by adding it to your
 |----------|----------|-------------|
 | `SLACK_BOT_TOKEN` | Yes | Bot token (`xoxb-...`) for posting, history, threads |
 | `SLACK_USER_TOKEN` | No | User token (`xoxp-...`) for `search.messages` (user-token-only endpoint) |
-| `MCP_SLACK_SPOOL_THRESHOLD` | No | Chars before spooling to disk (default: 12000) |
-| `MCP_SLACK_CACHE_DIR` | No | Cache directory (default: `.mcp-slack/cache`) |
+| `MCP_SLACK_USE_SPOOL_THRESHOLD` | No | Chars before spooling to disk (default: 12000). Old name `MCP_SLACK_SPOOL_THRESHOLD` still accepted. |
+| `MCP_SLACK_USE_CACHE_DIR` | No | Cache directory (default: `.mcp-slack-use/cache`). Old name `MCP_SLACK_CACHE_DIR` still accepted. |
 
 ## Tools
 
@@ -64,7 +64,7 @@ Wire the server into an MCP host (Claude Code, Cursor, …) by adding it to your
 ## Notes
 
 - All Slack API calls use `application/x-www-form-urlencoded` (not JSON)
-- Large results spool to `.mcp-slack/cache/` with file path in response
+- Large results spool to `.mcp-slack-use/cache/` with file path in response
 - Default responses use slim payloads; pass `full=true` for raw Slack JSON
 - Search auto-prefers user token when `SLACK_USER_TOKEN` is set
 
