@@ -1,6 +1,6 @@
 {
   "name": "mcp-slack",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "type": "module",
   "private": true,
   "scripts": {
@@ -8,7 +8,7 @@
     "http": "bun run src/mcp/cli.ts --http"
   },
   "dependencies": {
-    "edge.libx.js": "^0.6.2"
+    "edge.libx.js": "^0.7.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
