@@ -1,5 +1,5 @@
 /**
- * mcp-slack `ingress` — the inbound Slack protocol half for host apps (additive; new file).
+ * mcp-slack-use `ingress` — the inbound Slack protocol half for host apps (additive; new file).
  *
  * Owns everything transport-shaped: the `/api/slack/events` + `/api/slack/interactivity`
  * routes, rawBody + HMAC signature verification, url_verification, bot-echo skipping, dedupe,
@@ -166,9 +166,9 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
   let agentUid: string | null = null;
   let botUid: string | null = null;
   let ownBotId: string | null = null;
-  getAgentUserId().then(id => { agentUid = id; }).catch(err => console.warn('[mcp-slack] getAgentUserId failed:', err.message));
-  getBotUserId().then(id => { botUid = id; }).catch(err => console.warn('[mcp-slack] getBotUserId failed:', err.message));
-  getBotId().then(id => { ownBotId = id; console.log(`[mcp-slack] Own bot_id: ${id}`); opts.onReady?.({ botUserId: botUid, agentUserId: agentUid, ownBotId }); }).catch(err => console.warn('[mcp-slack] getBotId failed:', err.message));
+  getAgentUserId().then(id => { agentUid = id; }).catch(err => console.warn('[mcp-slack-use] getAgentUserId failed:', err.message));
+  getBotUserId().then(id => { botUid = id; }).catch(err => console.warn('[mcp-slack-use] getBotUserId failed:', err.message));
+  getBotId().then(id => { ownBotId = id; console.log(`[mcp-slack-use] Own bot_id: ${id}`); opts.onReady?.({ botUserId: botUid, agentUserId: agentUid, ownBotId }); }).catch(err => console.warn('[mcp-slack-use] getBotId failed:', err.message));
 
   // ── DM identity cache ──────────────────────────────────────────────────────
   type DmIdentity = 'bot' | 'agent' | null;
@@ -195,13 +195,13 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
   function enqueue(msg: IngressMessage) {
     const key = threadQueueKey(msg);
     const prev = threadQueues.get(key) || Promise.resolve();
-    const next = prev.then(() => runTurn(msg)).catch(err => console.error('[mcp-slack] ingress turn error:', err));
+    const next = prev.then(() => runTurn(msg)).catch(err => console.error('[mcp-slack-use] ingress turn error:', err));
     threadQueues.set(key, next);
   }
 
   // ── One turn: hydrate reaction, stream, bookkeeping ────────────────────────
   async function runTurn(msg: IngressMessage) {
-    await addReaction(msg.channel, msg.ts, 'hourglass_flowing_sand', msg.useUserToken).catch(err => console.warn('[mcp-slack] addReaction failed:', err.message));
+    await addReaction(msg.channel, msg.ts, 'hourglass_flowing_sand', msg.useUserToken).catch(err => console.warn('[mcp-slack-use] addReaction failed:', err.message));
     try {
       const iter = await opts.onMessage(msg);
       if (!iter) return;
@@ -211,10 +211,10 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
       );
       await opts.onReplied?.(msg, replyTs);
     } catch (err: any) {
-      console.error('[mcp-slack] ingress turn failed:', err?.message || err);
+      console.error('[mcp-slack-use] ingress turn failed:', err?.message || err);
       await postMessage(msg.channel, `⚠️ Error: ${err?.message}`, msg.threadTs, msg.useUserToken).catch(() => {});
     } finally {
-      await removeReaction(msg.channel, msg.ts, 'hourglass_flowing_sand', msg.useUserToken).catch(err => console.warn('[mcp-slack] removeReaction failed:', err.message));
+      await removeReaction(msg.channel, msg.ts, 'hourglass_flowing_sand', msg.useUserToken).catch(err => console.warn('[mcp-slack-use] removeReaction failed:', err.message));
     }
   }
 
@@ -228,7 +228,7 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
 
     const ev = body.event as SlackRawEvent;
     const auths = (body.authorizations || []).map((a: any) => `${a.is_bot ? 'bot' : 'user'}:${a.user_id}`).join(',');
-    console.log(`[mcp-slack] Event: type=${ev.type} channel=${ev.channel} channel_type=${ev.channel_type} user=${ev.user} bot_id=${ev.bot_id || '-'} auths=[${auths}]`);
+    console.log(`[mcp-slack-use] Event: type=${ev.type} channel=${ev.channel} channel_type=${ev.channel_type} user=${ev.user} bot_id=${ev.bot_id || '-'} auths=[${auths}]`);
 
     // Hard protocol skips: bot echoes / the app's own posts.
     if (ev.subtype === 'bot_message') return;
@@ -285,7 +285,7 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
     if (isDM && !hasBotAuth) {
       const identity = await resolveDmIdentity(ev.channel);
       if (identity === 'agent') msg.useUserToken = true;
-      else if (identity !== 'bot') { console.log(`[mcp-slack] Skipping DM in ${ev.channel} (unrelated)`); return; }
+      else if (identity !== 'bot') { console.log(`[mcp-slack-use] Skipping DM in ${ev.channel} (unrelated)`); return; }
     }
 
     // Hydrate file stubs (Events API delivers metadata-less stubs) before handing to the host.
@@ -306,9 +306,9 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
       const payload = JSON.parse((req.body?.payload as string) ?? '{}');
       await opts.onInteraction(payload);
     } catch (err) {
-      console.error('[mcp-slack] interactivity error:', (err as Error)?.message);
+      console.error('[mcp-slack-use] interactivity error:', (err as Error)?.message);
     }
   });
 
-  console.log(`[mcp-slack] Ingress registered on ${eventsPath}, ${interactivityPath}`);
+  console.log(`[mcp-slack-use] Ingress registered on ${eventsPath}, ${interactivityPath}`);
 }

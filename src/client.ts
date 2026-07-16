@@ -1,5 +1,5 @@
 /**
- * mcp-slack `client` — the unified Slack Web API for host apps (additive; wraps slack-api.ts).
+ * mcp-slack-use `client` — the unified Slack Web API for host apps (additive; wraps slack-api.ts).
  *
  * ONE token-resolution path (mirrors streamer.ts): bot token by default, user token when
  * `useUserToken` is set (falling back to the bot token when no xoxp- user token exists).
@@ -26,7 +26,7 @@ function resolveToken(useUserToken?: boolean): string {
 /** Low-level form-encoded Slack call with host-side token resolution. Errors log unless quiet. */
 export async function slackPost(method: string, body: Record<string, unknown>, useUserToken?: boolean, quiet?: boolean): Promise<any> {
   const data = await slackApi<any>(resolveToken(useUserToken), method, body);
-  if (!data.ok && !quiet) console.error(`[mcp-slack] ${method} failed:`, (data as any).error);
+  if (!data.ok && !quiet) console.error(`[mcp-slack-use] ${method} failed:`, (data as any).error);
   return data;
 }
 
@@ -108,9 +108,9 @@ export async function getAgentUserId(): Promise<string | null> {
   if (cachedAgentUserId) return cachedAgentUserId;
   if (!optionalUserToken()) return null;
   const data = await slackPost('auth.test', {}, true);
-  if (!data.ok) { console.warn('[mcp-slack] auth.test failed for user token:', data.error); return null; }
+  if (!data.ok) { console.warn('[mcp-slack-use] auth.test failed for user token:', data.error); return null; }
   cachedAgentUserId = data.user_id;
-  console.log(`[mcp-slack] Agent user ID: ${cachedAgentUserId}`);
+  console.log(`[mcp-slack-use] Agent user ID: ${cachedAgentUserId}`);
   return cachedAgentUserId;
 }
 
@@ -126,11 +126,11 @@ export async function getFileInfo(fileId: string, useUserToken?: boolean): Promi
     const data = await slackPost('files.info', { file: fileId }, asUser, true);
     if (data.ok) return data.file;
     if (data.error !== 'missing_scope' && data.error !== 'not_authed') {
-      console.warn(`[mcp-slack] files.info failed for ${fileId}:`, data.error);
+      console.warn(`[mcp-slack-use] files.info failed for ${fileId}:`, data.error);
       return null;
     }
   }
-  console.warn(`[mcp-slack] files.info failed for ${fileId}: no token has files:read`);
+  console.warn(`[mcp-slack-use] files.info failed for ${fileId}: no token has files:read`);
   return null;
 }
 
@@ -157,7 +157,7 @@ function warmChannelCache(): Promise<void> {
       const data = await slackPost('conversations.list', {
         types: 'public_channel,private_channel', limit: 200, ...(cursor ? { cursor } : {}),
       });
-      if (!data.ok) { console.warn('[mcp-slack] conversations.list failed during cache warm:', data.error); break; }
+      if (!data.ok) { console.warn('[mcp-slack-use] conversations.list failed during cache warm:', data.error); break; }
       for (const ch of data.channels ?? []) if (ch.id && ch.name) channelNameCache.set(ch.id, ch.name);
       cursor = data.response_metadata?.next_cursor || undefined;
     } while (cursor);
@@ -184,7 +184,7 @@ export async function getUserProfile(userId: string): Promise<SlackUserProfile> 
   if (cached) return cached;
   const data = await slackPost('users.info', { user: userId });
   if (!data.ok) {
-    console.warn(`[mcp-slack] users.info failed for ${userId}: ${data.error}`);
+    console.warn(`[mcp-slack-use] users.info failed for ${userId}: ${data.error}`);
     return { name: null, email: null, title: null };
   }
   const profile: SlackUserProfile = {
@@ -193,7 +193,7 @@ export async function getUserProfile(userId: string): Promise<SlackUserProfile> 
     title: data.user?.profile?.title || null,
   };
   if (profile.name) userProfileCache.set(userId, profile);
-  else console.warn(`[mcp-slack] users.info OK for ${userId} but no name found in profile`);
+  else console.warn(`[mcp-slack-use] users.info OK for ${userId} but no name found in profile`);
   return profile;
 }
 

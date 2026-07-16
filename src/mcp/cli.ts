@@ -13,7 +13,7 @@ if (isStdio) {
   await mcp.serveStdio();
 } else {
   const server = Bun.serve({ port, fetch: httpFetch });
-  console.error(`[mcp-slack] http+mcp listening on http://127.0.0.1:${server.port}`);
-  console.error(`[mcp-slack] MCP JSON-RPC: POST http://127.0.0.1:${server.port}/mcp`);
-  console.error(`[mcp-slack] REST: GET /health, /slack/channels, …`);
+  console.error(`[mcp-slack-use] http+mcp listening on http://127.0.0.1:${server.port}`);
+  console.error(`[mcp-slack-use] MCP JSON-RPC: POST http://127.0.0.1:${server.port}/mcp`);
+  console.error(`[mcp-slack-use] REST: GET /health, /slack/channels, …`);
 }

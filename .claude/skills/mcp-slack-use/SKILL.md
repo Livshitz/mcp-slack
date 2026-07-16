@@ -1,16 +1,16 @@
 ---
-name: mcp-slack
+name: mcp-slack-use
 description: >-
   Guides development and use of this Bun Slack Web API MCP: bot token, ids vs names,
   DM flow, search limitations, and spooled large responses. Use when editing this repo,
   configuring MCP/HTTP, or troubleshooting Slack API errors.
 when_to_use: >-
-  mcp-slack, SLACK_BOT_TOKEN, xoxb, chat.postMessage, conversations, Slack MCP,
+  mcp-slack-use, SLACK_BOT_TOKEN, xoxb, chat.postMessage, conversations, Slack MCP,
   DM open, lookupByEmail, spool, MCP_SLACK_CACHE_DIR.
 paths: "src/**/*.ts,package.json"
 ---
 
-# mcp-slack
+# mcp-slack-use
 
 ## Architecture
 

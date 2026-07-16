@@ -502,16 +502,16 @@ export function createSlackMcp() {
   base.catchNotFound();
 
   const mcp = base.asMCP({
-    name: 'mcp-slack',
+    name: 'mcp-slack-use',
     version: '0.1.0',
     instructions:
-      'Slack: post_message needs real ids (C/G/D). DM flow: get_slack_users (search by name) or get_slack_user_by_email → get user ID (U…) → post_slack_dm_open → post_slack_message with D… channel_id. Prefer get_slack_users over by-email when you don\'t know the exact email. Thread replies: get_slack_thread with channel + parent ts. EDIT/DELETE: this app CAN edit and delete its own messages (whether posted as the bot or as the agent\'s user account — both tokens are tried automatically) — post_slack_update { channel, ts, text/blocks } and post_slack_delete { channel, ts }; the ts comes from post_slack_message\'s return. Prefer editing over posting a "Correction:" follow-up. Search (q param): requires SLACK_USER_TOKEN (xoxp-); auto-used when set. Invite bot to channels for is_member true. Large payloads: spooled file path. Full workflows: MCP resource skill://mcp-slack/workflow.',
+      'Slack: post_message needs real ids (C/G/D). DM flow: get_slack_users (search by name) or get_slack_user_by_email → get user ID (U…) → post_slack_dm_open → post_slack_message with D… channel_id. Prefer get_slack_users over by-email when you don\'t know the exact email. Thread replies: get_slack_thread with channel + parent ts. EDIT/DELETE: this app CAN edit and delete its own messages (whether posted as the bot or as the agent\'s user account — both tokens are tried automatically) — post_slack_update { channel, ts, text/blocks } and post_slack_delete { channel, ts }; the ts comes from post_slack_message\'s return. Prefer editing over posting a "Correction:" follow-up. Search (q param): requires SLACK_USER_TOKEN (xoxp-); auto-used when set. Invite bot to channels for is_member true. Large payloads: spooled file path. Full workflows: MCP resource skill://mcp-slack-use/workflow.',
   });
 
   augmentMcpWithSkillResource(mcp, {
-    serverName: 'mcp-slack',
+    serverName: 'mcp-slack-use',
     repoRootAbs: resolve(import.meta.dirname, '..'),
-    skillRelativePath: '.claude/skills/mcp-slack/SKILL.md',
+    skillRelativePath: '.claude/skills/mcp-slack-use/SKILL.md',
   });
 
   // Keep the agent's Slack user account appearing online (cleared by mcp.close() for ephemeral embeds)
@@ -519,7 +519,7 @@ export function createSlackMcp() {
   const userToken = optionalUserToken();
   if (userToken) {
     const ping = () => slackApi(userToken, 'users.setPresence', { presence: 'auto' })
-      .catch(e => console.error('[mcp-slack] setPresence failed:', e));
+      .catch(e => console.error('[mcp-slack-use] setPresence failed:', e));
     ping();
     presencePingTimer = setInterval(ping, 5 * 60 * 1000);
   }
@@ -536,7 +536,7 @@ export function createSlackMcp() {
   async function httpFetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/health') {
-      return json({ ok: true, service: 'mcp-slack' });
+      return json({ ok: true, service: 'mcp-slack-use' });
     }
     if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {
       return mcp.httpHandler(req);

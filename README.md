@@ -1,4 +1,4 @@
-# mcp-slack
+# mcp-slack-use
 
 MCP server for the Slack API — channels, messages, search, DMs, and reactions.
 
@@ -31,7 +31,7 @@ bun run src/mcp/cli.ts --port 3840 # HTTP mode
 Wire the server into an MCP host (Claude Code, Cursor, …) by adding it to your `.mcp.json` (or run `claude mcp add`):
 
 ```json
-{ "mcpServers": { "slack": { "command": "bunx", "args": ["mcp-slack", "--stdio"], "env": { "SLACK_BOT_TOKEN": "xoxb-..." } } } }
+{ "mcpServers": { "slack": { "command": "bunx", "args": ["mcp-slack-use", "--stdio"], "env": { "SLACK_BOT_TOKEN": "xoxb-..." } } } }
 ```
 
 ## Env Vars

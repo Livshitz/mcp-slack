@@ -104,11 +104,11 @@ export async function downloadFileBuffer(url: string, botToken: string, userToke
   const tokens = [botToken, ...(userToken ? [userToken] : [])];
   for (const token of tokens) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) { console.warn(`[mcp-slack] File download failed (${res.status}): ${url}`); continue; }
+    if (!res.ok) { console.warn(`[mcp-slack-use] File download failed (${res.status}): ${url}`); continue; }
     const ct = res.headers.get('content-type') || '';
     // A text/html response usually means an auth-redirect login page — but a genuine .html
     // file also downloads as text/html, so skip this guard when the caller expects HTML.
-    if (!allowHtml && ct.includes('text/html')) { console.warn(`[mcp-slack] File download returned HTML (auth redirect?), retrying with next token`); continue; }
+    if (!allowHtml && ct.includes('text/html')) { console.warn(`[mcp-slack-use] File download returned HTML (auth redirect?), retrying with next token`); continue; }
     return Buffer.from(await res.arrayBuffer());
   }
   throw new Error(`Failed to download Slack file after ${tokens.length} token attempts: ${url}`);
