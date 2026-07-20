@@ -12,6 +12,13 @@ export async function slackApi<T>(
   method: string,
   body: Record<string, unknown>,
 ): Promise<SlackResult<T>> {
+  // `chat:write.public` lets the bot POST to a public channel without joining — but Slack only
+  // DELIVERS events (mentions, messages) from channels the bot is a MEMBER of. So a bot could talk
+  // in a channel yet be deaf to it. Auto-join on the first post to a public channel closes that gap:
+  // "the agent posted here" now implies "the agent listens here". Idempotent + cached per process.
+  // Fire-and-forget: the post itself needs no membership (chat:write.public), so joining must not
+  // add latency to the streaming hot path — it only matters for future inbound event delivery.
+  maybeAutoJoin(token, method, body);
   /** Slack accepts JSON or form bodies; form is required for some args (e.g. conversations.list `limit`) to apply. */
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(body)) {
@@ -27,6 +34,28 @@ export async function slackApi<T>(
     body: params.toString(),
   });
   return res.json() as Promise<SlackResult<T>>;
+}
+
+// Channels we've already attempted to join this process (attempt cached regardless of outcome, so
+// we try once per channel — a private channel or a missing `channels:join` scope errors quietly once).
+const joinAttempted = new Set<string>();
+
+async function maybeAutoJoin(token: string, method: string, body: Record<string, unknown>): Promise<void> {
+  if (method !== 'chat.postMessage') return;
+  const channel = body.channel;
+  // Public-channel ids start with 'C'. DMs ('D'), group DMs ('G'), and already-joined channels
+  // need no join. Only a bot token (xoxb-) should self-join; a user token is already a member.
+  if (typeof channel !== 'string' || !channel.startsWith('C')) return;
+  if (!token.startsWith('xoxb-')) return;
+  if (joinAttempted.has(channel)) return;
+  joinAttempted.add(channel);
+  try {
+    const res = await slackApi<{ ok: boolean }>(token, 'conversations.join', { channel });
+    if (!res.ok && (res as SlackErr).error !== 'method_not_supported_for_channel_type')
+      console.warn(`[mcp-slack-use] auto-join ${channel} failed:`, (res as SlackErr).error);
+  } catch (err) {
+    console.warn(`[mcp-slack-use] auto-join ${channel} threw:`, (err as Error).message);
+  }
 }
 
 export function requireToken(): string {
