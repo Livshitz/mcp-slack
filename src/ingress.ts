@@ -200,15 +200,18 @@ export function registerSlackIngress(app: AppLike, opts: SlackIngressOptions): v
   }
 
   function enqueue(msg: IngressMessage) {
+    // Ack on ENQUEUE, not when the turn starts: a message queued behind a long-running turn
+    // otherwise sits with zero feedback for minutes and the agent looks hung. The matching
+    // removeReaction still fires when this message's own turn finishes.
+    addReaction(msg.channel, msg.ts, 'hourglass_flowing_sand', msg.useUserToken).catch(err => console.warn('[mcp-slack-use] addReaction failed:', err.message));
     const key = threadQueueKey(msg);
     const prev = threadQueues.get(key) || Promise.resolve();
     const next = prev.then(() => runTurn(msg)).catch(err => console.error('[mcp-slack-use] ingress turn error:', err));
     threadQueues.set(key, next);
   }
 
-  // ── One turn: hydrate reaction, stream, bookkeeping ────────────────────────
+  // ── One turn: stream, bookkeeping ──────────────────────────────────────────
   async function runTurn(msg: IngressMessage) {
-    await addReaction(msg.channel, msg.ts, 'hourglass_flowing_sand', msg.useUserToken).catch(err => console.warn('[mcp-slack-use] addReaction failed:', err.message));
     try {
       const iter = await opts.onMessage(msg);
       if (!iter) return;
