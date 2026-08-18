@@ -49,6 +49,8 @@ export class SlackStreamer {
   private afterTool = false;
   private toolMarkers: boolean;
 
+  private lastFinalizedTs: string | null = null;
+
   public ts: string | null = null;
   public readonly flat: boolean;
 
@@ -107,7 +109,7 @@ export class SlackStreamer {
       : this.fullText;
     const finalMrkdwn = this.transform(resolvedText);
 
-    if (!finalMrkdwn.trim()) return null;
+    if (!finalMrkdwn.trim()) return this.lastFinalizedTs;
 
     if (this.flat) {
       return this._postMessage(finalMrkdwn);
@@ -119,6 +121,32 @@ export class SlackStreamer {
       return this._postMessage(finalMrkdwn);
     }
 
+    return this._finalizeCurrent(finalMrkdwn);
+  }
+
+  /**
+   * Close the message in flight and start a fresh one for whatever follows. Call this before the
+   * host posts its OWN message mid-turn (e.g. an interactive question form): otherwise the rest of
+   * the reply keeps appending to the earlier message, i.e. ABOVE that form, which reads as the
+   * agent answering before it asked. No-op when nothing has been streamed yet.
+   */
+  async cut(): Promise<void> {
+    if (this.aborted || this.flat) return;
+    this._clearTimer();
+    if (this.startPromise) await this.startPromise;
+    if (!this.ts) return;
+    const text = this.finalTransform ? await this.finalTransform(this.fullText) : this.fullText;
+    await this._finalizeCurrent(this.transform(text));
+    this.ts = null;
+    this.started = false;
+    this.startPromise = null;
+    this.buffer = '';
+    this.fullText = '';
+    this.afterTool = false;
+  }
+
+  /** stopStream + chat.update the in-flight message with its final text. Assumes this.ts is set. */
+  private async _finalizeCurrent(finalMrkdwn: string): Promise<string | null> {
     // Flush remaining buffer and wait for all sends to complete
     this._flushRemaining();
     await this.flushChain;
@@ -141,6 +169,7 @@ export class SlackStreamer {
     if (!updateRes.ok) {
       console.error('[slack-streamer] chat.update failed:', (updateRes as any).error);
     }
+    this.lastFinalizedTs = this.ts;
     return this.ts;
   }
 
